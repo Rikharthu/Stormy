@@ -1,1 +1,13 @@
 We use OkHttp library for networking
+
+In here, we have a getForecast method that we see here, and
+1:08
+it's using a third-party OkHttp library to get data from the API.
+1:13
+A successful request ends up calling the onResponse method down here,
+1:17
+the callback from the enqueue method that we define here.
+1:21
+And line 110 down here shows that we are setting the current weather variable
+1:26
+using a method called getCurrentDetails from the jsonData that's returned.
