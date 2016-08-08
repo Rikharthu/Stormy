@@ -1,10 +1,19 @@
 package com.uv.stormy.ui;
 
+import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentSender;
+import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
+import android.location.Location;
+import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -15,6 +24,11 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.location.LocationListener;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationServices;
 import com.uv.stormy.R;
 import com.uv.stormy.weather.Current;
 import com.uv.stormy.weather.Day;
@@ -37,25 +51,47 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity implements
+        GoogleApiClient.ConnectionCallbacks,
+        GoogleApiClient.OnConnectionFailedListener,
+        LocationListener{
 
-    public static final String TAG =MainActivity.class.getSimpleName();
+    public static final String TAG = MainActivity.class.getSimpleName();
     public static final String DAILY_FORECAST = "DAILY_FORECAST";
     public static final String HOURLY_FORECAST = "HOURLY_FORECAST";
 
+    /*
+    * Define a request code to send to Google Play services
+    * This code is returned in Activity.onActivityResult
+    */
+    private final static int CONNECTION_FAILURE_RESOLUTION_REQUEST = 9000;
+
+    private LocationRequest mLocationRequest;
+    private Location mLocation;
+    private GoogleApiClient mGoogleApiClient;
     private Forecast mForecast;
 
     // Bind a field to the view for the specified ID. The view will automatically be cast to the field type.
-    @BindView(R.id.timeLabel)       TextView    mTimeLabel;
-    @BindView(R.id.temperatureLabel)TextView    mTemperatureLabel;
-    @BindView(R.id.humidityValue)   TextView    mHumidityValue;
-    @BindView(R.id.precipValue)     TextView    mPrecipValue;
-    @BindView(R.id.summaryLabel)    TextView    mSummaryLabel;
-    @BindView(R.id.iconImageView)   ImageView   mIconImageView;
-    @BindView(R.id.refreshImageView)ImageView   mRefreshImageView;
-    @BindView(R.id.progressBar)     ProgressBar mProgressBar;
-    @BindView(R.id.locationLabel)   TextView    mLocationlabel;
-    @BindView(R.id.dailyButton)     Button      mDailyButton;
+    @BindView(R.id.timeLabel)
+    TextView mTimeLabel;
+    @BindView(R.id.temperatureLabel)
+    TextView mTemperatureLabel;
+    @BindView(R.id.humidityValue)
+    TextView mHumidityValue;
+    @BindView(R.id.precipValue)
+    TextView mPrecipValue;
+    @BindView(R.id.summaryLabel)
+    TextView mSummaryLabel;
+    @BindView(R.id.iconImageView)
+    ImageView mIconImageView;
+    @BindView(R.id.refreshImageView)
+    ImageView mRefreshImageView;
+    @BindView(R.id.progressBar)
+    ProgressBar mProgressBar;
+    @BindView(R.id.locationLabel)
+    TextView mLocationlabel;
+    @BindView(R.id.dailyButton)
+    Button mDailyButton;
     private static final String API_KEY = "f001bb783cc27374e9f473499f3b196f";
     /* ButterKnife finds annotations and generates the code we need for binding on the fly */
 
@@ -75,29 +111,45 @@ public class MainActivity extends AppCompatActivity {
 
         mProgressBar.setVisibility(View.INVISIBLE);
 
-        // FIXME make dynamic
-        final double latitude= 56.9496;
-        final double longtitude= 24.1052;
-
+        // TODO на данный момент просто напрямую вызывает getForecast, но не проверяет и не получает новую локацию
+        // TODO добавить запрос новой локации. Если не получилось, вывести TOAST и юзать старую.
         mRefreshImageView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                getForecast(latitude, longtitude);
+                getForecast();
             }
         });
 
-        getForecast(latitude, longtitude);
 
-        Log.d(TAG,"Main UI code is running!");
+        // // Create an instance of GoogleAPIClient.
+        mGoogleApiClient = new GoogleApiClient.Builder(this)
+                .addConnectionCallbacks(this) // MainActivity will handle connection stuff
+                .addOnConnectionFailedListener(this)
+                .addApi(LocationServices.API) // adds the LocationServices API endpoint from GooglePlayServices
+                .build();
+
+        // Create the LocationRequest object
+        mLocationRequest = LocationRequest.create()
+                .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY) // as accurate a location as possible.
+                .setInterval(10 * 1000)        // 10 seconds, in milliseconds
+                .setFastestInterval(1 * 1000); // 1 second, in milliseconds. Fastest interval at which our app will receive updates.
+        /* This can be lower than the interval we set ourselves in case other apps are
+        requesting location updates from Google Play Services. When that happens,
+        our app can passively listen to any location updates, which doesn’t cost any extra power. */
+
+//        getForecast(latitude, longtitude);
+
+        Log.d(TAG, "Main UI code is running!");
 
     }
 
-    private void getForecast(double latitude, double longtitude) {
+    private void getForecast() {
         // Используем параметр Locale.ROOT, чтобы десятичный сепаратор был точкой, а не запятой.
-        String forecastUrl = String.format(Locale.ROOT,"https://api.forecast.io/forecast/%s/%f,%f", API_KEY,latitude,longtitude);
+        String forecastUrl = String.format(Locale.ROOT, "https://api.forecast.io/forecast/%s/%f,%f", API_KEY, mLocation.getLatitude(), mLocation.getLongitude());
 
+        // TODO perform geolocation service checks here
         // Check if network is available
-        if(isNetworkAvailable()) {
+        if (isNetworkAvailable()) {
             toggleRefresh();
 
             // create OkHttpClient
@@ -143,7 +195,7 @@ public class MainActivity extends AppCompatActivity {
                     try {
                         Log.d(TAG, response.toString());
                         if (response.isSuccessful()) {
-                            mForecast= parseForecastDetails(jsonData);
+                            mForecast = parseForecastDetails(jsonData);
                             // Only UI (main) can update UI. Currently this method is called from async thread (call.enqueue....)
                             // Runs the specified action on the UI thread. Not immediately
                             runOnUiThread(new Runnable() {
@@ -163,17 +215,17 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-        }else{
+        } else {
             // Network is unavailable
             Toast.makeText(MainActivity.this, R.string.network_unavailable_message, Toast.LENGTH_SHORT).show();
         }
     }
 
     private void toggleRefresh() {
-        if(mProgressBar.getVisibility() == View.INVISIBLE) {
+        if (mProgressBar.getVisibility() == View.INVISIBLE) {
             mProgressBar.setVisibility(View.VISIBLE);
             mRefreshImageView.setVisibility(View.INVISIBLE);
-        }else{
+        } else {
             mProgressBar.setVisibility(View.INVISIBLE);
             mRefreshImageView.setVisibility(View.VISIBLE);
         }
@@ -181,14 +233,14 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateDisplay() {
         Current current = mForecast.getCurrent();
-        mTemperatureLabel.setText((int) current.getTemperature()+"");
+        mTemperatureLabel.setText((int) current.getTemperature() + "");
         mSummaryLabel.setText(current.getSummary());
-        mHumidityValue.setText(current.getHumidity()+"");
-        mPrecipValue.setText(current.getPrecipChance()+"%");
-        mTimeLabel.setText("At " + current.getFormattedTime()+" it will be");
+        mHumidityValue.setText(current.getHumidity() + "");
+        mPrecipValue.setText(current.getPrecipChance() + "%");
+        mTimeLabel.setText("At " + current.getFormattedTime() + " it will be");
         mLocationlabel.setText(current.getTimeZone()
-                .replaceAll("/",", " )
-                .replaceAll("_"," "));
+                .replaceAll("/", ", ")
+                .replaceAll("_", " "));
 
         Drawable drawable = getResources().getDrawable(current.getIconId());
         mIconImageView.setImageDrawable(drawable);
@@ -215,7 +267,7 @@ public class MainActivity extends AppCompatActivity {
 
         Day[] days = new Day[data.length()];
 
-        for(int i = 0; i < data.length(); i++){
+        for (int i = 0; i < data.length(); i++) {
             JSONObject jsonDay = data.getJSONObject(i);
             Day day = new Day();
 
@@ -225,7 +277,7 @@ public class MainActivity extends AppCompatActivity {
             day.setTemperatureMax(jsonDay.getDouble("temperatureMax"));
             day.setTime(jsonDay.getLong("time"));
 
-            days[i]=day;
+            days[i] = day;
         }
 
         return days;
@@ -240,7 +292,7 @@ public class MainActivity extends AppCompatActivity {
 
         Hour[] hours = new Hour[data.length()];
 
-        for(int i = 0; i < data.length(); i++){
+        for (int i = 0; i < data.length(); i++) {
             JSONObject jsonHour = data.getJSONObject(i);
             Hour hour = new Hour();
 
@@ -250,7 +302,7 @@ public class MainActivity extends AppCompatActivity {
             hour.setTime(jsonHour.getLong("time"));
             hour.setTimezone(timezone);
 
-            hours[i]=hour;
+            hours[i] = hour;
         }
 
         return hours;
@@ -273,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
         current.setTemperature(currently.getDouble("temperature"));
         current.setTimeZone(timezone);
 
-        Log.i(TAG, "From JSON: "+timezone+"\nWeather: "+ current.toString()+"\nFormatted time: "+ current.getFormattedTime());
+        Log.i(TAG, "From JSON: " + timezone + "\nWeather: " + current.toString() + "\nFormatted time: " + current.getFormattedTime());
 
         return current;
     }
@@ -288,8 +340,8 @@ public class MainActivity extends AppCompatActivity {
         // This method requires the caller to hold the permission ACCESS_NETWORK_STATE. (manifest)
         NetworkInfo networkInfo = manager.getActiveNetworkInfo();
         boolean isAvailable = false;
-        if(networkInfo !=null && networkInfo.isConnected()){
-            isAvailable=true;
+        if (networkInfo != null && networkInfo.isConnected()) {
+            isAvailable = true;
         }
         return isAvailable;
     }
@@ -297,11 +349,11 @@ public class MainActivity extends AppCompatActivity {
     private void alertUserAboutError() {
         AlertDialogFragment dialog = new AlertDialogFragment();
         // Show error dialog
-        dialog.show(getFragmentManager(),"error_dialog");
+        dialog.show(getFragmentManager(), "error_dialog");
     }
 
     @OnClick(R.id.dailyButton)// method that executes when button with given id is clicked
-    public void startDailyActivity(View view){
+    public void startDailyActivity(View view) {
         Intent intent = new Intent(this, DailyForecastActivity.class);
         // pass array of days forecast
         intent.putExtra(DAILY_FORECAST, mForecast.getDailyForecast());
@@ -309,9 +361,114 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @OnClick(R.id.hourlyButton)
-    public void startHourlyActivity(View view){
+    public void startHourlyActivity(View view) {
         Intent intent = new Intent(this, HourlyForecastActivity.class);
-        intent.putExtra(HOURLY_FORECAST,mForecast.getHourlyForecast());
+        intent.putExtra(HOURLY_FORECAST, mForecast.getHourlyForecast());
         startActivity(intent);
+    }
+
+
+    /* Google Play Services */
+
+    // When our client finally connects to the location services, the onConnected() method will be called.
+    @Override
+    public void onConnected(@Nullable Bundle bundle) {
+        Log.i(TAG, "Location services connected.");
+
+
+        // If the device is running Android 6.0 or higher, and your app's target SDK is 23 or higher,
+        // the app has to list the permissions in the manifest and request those permissions at run time.
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            Log.d(TAG,"checkSelfPermission() failed");
+            return;
+        }
+        // TODO prompt user to turn on geolocation somewhere
+        // Request last known location
+        Location location = LocationServices.FusedLocationApi.getLastLocation(mGoogleApiClient);
+        // Check if there is last know location
+        if (location == null) {
+            // Blank for a moment...
+            Log.d(TAG,"Last location unknown. Requesting new location from "+LocationManager.GPS_PROVIDER);
+            LocationServices.FusedLocationApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
+
+        }
+        else {
+            Log.d(TAG,"Latitude: "+location.getLatitude()+"\nLongtitude: "+location.getLongitude());
+            handleNewLocation(location);
+        };
+    }
+
+    private void handleNewLocation(Location location) {
+        Log.d(TAG, location.toString());
+        mLocation=location;
+        getForecast();
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+        Log.i(TAG, "Location services suspended. Please reconnect.");
+    }
+
+    @Override
+    public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+        /*
+         * Google Play services can resolve some errors it detects.
+         * If the error has a resolution, try sending an Intent to
+         * start a Google Play services activity that can resolve
+         * error.
+         */
+        if (connectionResult.hasResolution()) {
+            try {
+                // Start an Activity that tries to resolve the error
+                connectionResult.startResolutionForResult(this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
+                /*
+                 * Thrown if Google Play services canceled the original
+                 * PendingIntent
+                 */
+            } catch (IntentSender.SendIntentException e) {
+                // Log the error
+                e.printStackTrace();
+            }
+        } else {
+            /*
+             * If no resolution is available, display a dialog to the
+             * user with the error.
+             */
+            Log.i(TAG, "Location services connection failed with code " + connectionResult.getErrorCode());
+        }
+    }
+
+    // gets called every time a new location is detected by Google Play Services
+    @Override
+    public void onLocationChanged(Location location) {
+        handleNewLocation(location);
+    }
+
+
+    /* Activity Lifecycle */
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // connect to google play services
+        mGoogleApiClient.connect();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // disconnect everytime activity is overlapped
+        // Removing Updates When Finished
+        if (mGoogleApiClient.isConnected()) {
+            LocationServices.FusedLocationApi.removeLocationUpdates(mGoogleApiClient, this);
+            mGoogleApiClient.disconnect();
+        }
     }
 }

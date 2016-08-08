@@ -77,7 +77,8 @@ public class HourAdapter extends RecyclerView.Adapter<HourAdapter.HourViewHolder
 
         public HourViewHolder(View itemView) {
             super(itemView);
-
+            // Note, that we use itemView to find views by id. That's because all these
+            // Views belong to itemView rather than HourViewHolder, who is just a holder.
 //            mTimeLabel=(TextView)itemView.findViewById(R.id.timeLabel);
 //            mSummaryLabel=(TextView)itemView.findViewById(R.id.summaryLabel);
 //            mTemperatureLabel=(TextView)itemView.findViewById(R.id.temperatureLabel);
@@ -88,7 +89,11 @@ public class HourAdapter extends RecyclerView.Adapter<HourAdapter.HourViewHolder
             //set a listener for the root view in the ViewHolder
             itemView.setOnClickListener(this);
         }
-
+        /*
+        RecyclerView -many-> itemView{TextView, ImageView, etc...}-single-> HourViewHolder (refers to {TextView, ImageView, etc...})
+        itemView is a single list entry. It responds to user clicks and contains all these TextViews
+        HourViewHolder is used to group and refer to Views
+         */
         // Bind hour fields to according views
         public void bindHour(Hour hour){
             mTimeLabel.setText(hour.getHour());
